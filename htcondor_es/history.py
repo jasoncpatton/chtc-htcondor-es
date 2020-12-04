@@ -419,12 +419,14 @@ def process_histories(schedd_ads = [], startd_ads = [],
     chkp_updater = multiprocessing.Process(target=_chkp_updater)
     chkp_updater.start()
 
-    # Check whether one of the processes timed out and reset their last
-    # completion checkpoint in case
+    # Check if the entire pool and/or one of the processes has timed out
+    # Timeout is currently hardcoded to 11 minutes in utils.py
     timed_out = False
     for name, future in futures:
-        if utils.time_remaining(starttime) > -10:
+        # Allow a 30 second buffer for processes to finish
+        if utils.time_remaining(starttime, positive=False) > -30:
             try:
+                # Each process gets a minimum of 10 seconds to produce output
                 future.get(utils.time_remaining(starttime) + 10)
             except multiprocessing.TimeoutError:
                 # This implies that the checkpoint hasn't been updated
@@ -448,6 +450,7 @@ def process_histories(schedd_ads = [], startd_ads = [],
                 )
         else:
             timed_out = True
+            logging.error("Processing the entire queue took too long, stopping early")
             break
     if timed_out:
         pool.terminate()

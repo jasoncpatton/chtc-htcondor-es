@@ -32,7 +32,7 @@ def main_driver(args):
         startd_ads = utils.get_startds(args)
         logging.warning("&&& There are %d startds to query.", len(startd_ads))
 
-    with multiprocessing.Pool(processes=args.process_parallel_queries) as pool:
+    with multiprocessing.Pool(processes=args.process_parallel_queries, maxtasksperchild=1) as pool:
         metadata = utils.collect_metadata()
 
         if args.process_schedd_history:
