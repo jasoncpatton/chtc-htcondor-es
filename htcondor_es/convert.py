@@ -329,6 +329,7 @@ BOOL_ATTRS = {
     "SuccessPreExitBySignal",
     "TerminationPending",
     "TransferIn",
+    "TransferOut",
     "TransferQueued",
     "TransferringInput",
     "TransferringOutput",
