@@ -1,13 +1,11 @@
 #!/usr/bin/env python
 """
-Script for processing the contents of the CHTC pool.
+Script for pushing condor_history ads to Elasticsearch.
 """
 
 import sys
 import time
-import signal
 import logging
-import argparse
 import multiprocessing
 
 from es_push import history, utils, config
@@ -74,7 +72,12 @@ def main():
     # set up logging
     utils.set_up_logging(args)
 
+    logging.warning("="*30)
+    logging.warning("Starting up Elasticsearch push script")
+    logging.debug(f"Using args:\n{args}")
     main_driver(args)
+    logging.warning("Stopping Elasticsearch push script")
+    logging.warning("="*30)
 
 
 if __name__ == "__main__":
