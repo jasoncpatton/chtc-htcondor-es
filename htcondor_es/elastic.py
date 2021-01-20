@@ -121,7 +121,7 @@ def get_server_handle(args=None):
                 es_port = int(es_port)
             else:
                 logging.error(
-                    "Ambiguous host:port in given Elasticsearch host address: {args.es_host}"
+                    f"Ambiguous host:port in given Elasticsearch host address: {args.es_host}"
                 )
                 sys.exit(1)
         else:
