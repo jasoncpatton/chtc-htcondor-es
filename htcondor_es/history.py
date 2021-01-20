@@ -18,65 +18,39 @@ from . import elastic, utils, convert
 _LAUNCH_TIME = int(time.time())
 
 
-def index_time(index_attr, ad):
-    """
-    Returns
-        - user-preferred timestamp attr if present
-        - else EnteredCurrentStatus if present
-        - else QDate if present
-        - else fall back to launch time
-    """
-    try:
-        if int(ad.get(index_attr, 0)) > 0:
-            return ad[index_attr]
-    except (ValueError, TypeError):
-        logging.error(f"The value of {index_attr} is not numeric and cannot be used as a timestamp, falling back to EnteredCurrentStatus")
-
-    if ad.get("EnteredCurrentStatus", 0) > 0:
-        return ad["EnteredCurrentStatus"]
-
-    if ad.get("QDate", 0) > 0:
-        return ad["QDate"]
-
-    return _LAUNCH_TIME
-
-
 def process_schedd(
-    start_time, last_completion, checkpoint_queue, schedd_ad, args, metadata=None
+    start_time, since, checkpoint_queue, schedd_ad, args, metadata=None
 ):
     """
     Given a schedd, process its entire set of history since last checkpoint.
     """
     my_start = time.time()
-    if utils.time_remaining(start_time) < 0:
-        message = (
-            "No time remaining to process %s history; exiting." % schedd_ad["Name"]
-        )
-        logging.error(message)
-        utils.send_email_alert(
-            args.email_alerts, "spider history timeout warning", message
-        )
-        return last_completion
-
     metadata = metadata or {}
+    metadata["condor_history_source"] = "schedd"
+    metadata["condor_history_runtime"] = int(my_start)
+    metadata["condor_history_host_version"] = schedd_ad.get("CondorVersion", "UNKNOWN")
+    metadata["condor_history_host_platform"] = schedd_ad.get("CondorPlatform", "UNKNOWN")
+    metadata["condor_history_host_machine"] = schedd_ad.get("Machine", "UNKNOWN")
+    metadata["condor_history_host_name"] = schedd_ad.get("Name", "UNKNOWN")
+    last_completion = since["EnteredCurrentStatus"]
+    since_str = f"""(ClusterId == {since['ClusterId']}) && (ProcId == {since['ProcId']})"""
     schedd = htcondor.Schedd(schedd_ad)
-    history_query = classad.ExprTree(f"( EnteredCurrentStatus >= {int(last_completion)} )")
-    logging.info(
-        "Querying %s for history: %s.  " "%.1f minutes of ads",
-        schedd_ad["Name"],
-        history_query,
-        (time.time() - last_completion) / 60.0,
-    )
+
+    logging.info(f"Querying {schedd_ad['Name']} for history ads since: {since_str}")
     buffered_ads = {}
     count = 0
     total_upload = 0
-    sent_warnings = False
     timed_out = False
-    if not args.read_only and args.es_feed_schedd_history:
+    if not args.read_only:
         es = elastic.get_server_handle(args)
     try:
         if not args.dry_run:
-            history_iter = schedd.history(history_query, [], max(10000, args.process_max_documents))
+            history_iter = schedd.history(
+                constraint="true",
+                projection=[],
+                match=max(10000, args.schedd_history_max_ads),
+                since=since_str
+            )
         else:
             history_iter = []
 
@@ -88,62 +62,43 @@ def process_schedd(
                 exc = traceback.format_exc()
                 message += f"\n{exc}"
                 logging.warning(message)
-                if not sent_warnings:
-                    utils.send_email_alert(
-                        args.email_alerts,
-                        "spider history document conversion error",
-                        message,
-                    )
-                    sent_warnings = True
-
                 continue
 
-            idx = elastic.get_index(
-                index_time(args.es_index_date_attr, job_ad),
-                template=args.es_index_name,
-                update_es=(args.es_feed_schedd_history and not args.read_only),
-            )
-            ad_list = buffered_ads.setdefault(idx, [])
+            ad_list = buffered_ads.setdefault(args.es_index_name, [])
             ad_list.append((convert.unique_doc_id(dict_ad), dict_ad))
 
             if len(ad_list) == args.es_bunch_size:
                 st = time.time()
-                if not args.read_only and args.es_feed_schedd_history:
-                    elastic.post_ads(es.handle, idx, ad_list, metadata=metadata)
-                logging.debug(
-                    "...posting %d ads from %s (process_schedd)",
-                    len(ad_list),
-                    schedd_ad["Name"],
-                )
+                if not args.read_only:
+                    elastic.post_ads(es.handle, args.es_index_name, ad_list, metadata=metadata)
+                logging.debug(f"Posting {len(ad_list)} ads from {schedd_ad['Name']} (process_schedd)")
                 total_upload += time.time() - st
-                buffered_ads[idx] = []
+                buffered_ads[args.es_index_name] = []
 
             count += 1
 
-            # Find the most recent job and use that date as the new
-            # last_completion date
-            job_completion = job_ad.get("EnteredCurrentStatus")
+            # Find the most recent job and use its job id as the since parameter
+            job_completion = job_ad.get("EnteredCurrentStatus", 0)
             if job_completion > last_completion:
                 last_completion = job_completion
+                since = {
+                    "ClusterId": job_ad.get("ClusterId", 0),
+                    "ProcId": job_ad.get("ProcId", 0),
+                    "EnteredCurrentStatus": job_ad.get("EnteredCurrentStatus", int(time.time())),
+                }
 
-            if utils.time_remaining(start_time) < 0:
-                message = f"History crawler on {schedd_ad['Name']} has been running for more than {utils.TIMEOUT_MINS:d} minutes; exiting."
+            if utils.time_remaining(start_time, schedd_history_timeout) <= 0:
+                message = f"History crawler on {schedd_ad['Name']} has been running for more than {schedd_history_timeout} seconds; exiting."
                 logging.error(message)
-                utils.send_email_alert(
-                    args.email_alerts, "spider history timeout warning", message
-                )
                 timed_out = True
                 break
 
-            if args.process_max_documents and count > args.process_max_documents:
-                logging.warning(
-                    "Aborting after %d documents (--process_max_documents option)"
-                    % args.process_max_documents
-                )
+            if args.schedd_history_max_ads and count > args.schedd_history_max_ads:
+                logging.warning(f"Aborting after {args.schedd_history_max_ads} documents")
                 break
 
     except RuntimeError:
-        message = "Failed to query schedd for job history: %s" % schedd_ad["Name"]
+        message = f"Failed to query schedd for job history: {schedd_ad['Name']}"
         exc = traceback.format_exc()
         message += f"\n{exc}"
         logging.error(message)
@@ -153,42 +108,29 @@ def process_schedd(
         exc = traceback.format_exc()
         message += f"\n{exc}"
         logging.exception(message)
-        utils.send_email_alert(
-            args.email_alerts, "spider schedd history query error", message
-        )
 
     # Post the remaining ads
     for idx, ad_list in list(buffered_ads.items()):
         if ad_list:
-            logging.debug(
-                "...posting remaining %d ads from %s " "(process_schedd)",
-                len(ad_list),
-                schedd_ad["Name"],
-            )
+            logging.debug(f"Posting remaining {len(ad_list)} ads from {schedd_ad['Name']} (process_schedd)")
             if not args.read_only:
-                if args.es_feed_schedd_history:
-                    elastic.post_ads(es.handle, idx, ad_list, metadata=metadata)
+                elastic.post_ads(es.handle, idx, ad_list, metadata=metadata)
 
     total_time = (time.time() - my_start) / 60.0
     total_upload /= 60.0
     last_formatted = datetime.datetime.fromtimestamp(last_completion).strftime(
         "%Y-%m-%d %H:%M:%S"
     )
-    logging.warning(
-        "Schedd %-25s history: response count: %5d; last completion %s; query time %.2f min; upload time %.2f min",
-        schedd_ad["Name"],
-        count,
-        last_formatted,
-        total_time - total_upload,
-        total_upload,
+    logging.info(
+        f"Schedd {schedd_ad['Name']} history: response count: {count}; last job {last_formatted}; query time {total_time - total_upload:.2f} min; upload time {total_upload:.2f} min"
     )
 
     # If we got to this point without a timeout, all these jobs have
     # been processed and uploaded, so we can update the checkpoint
     if not timed_out:
-        checkpoint_queue.put((schedd_ad["Name"], last_completion))
+        checkpoint_queue.put((schedd_ad["Name"], since))
 
-    return last_completion
+    return since
 
 def process_startd(
     start_time, since, checkpoint_queue, startd_ad, args, metadata=None
@@ -196,35 +138,33 @@ def process_startd(
     """
     Given a startd, process its entire set of history since last checkpoint.
     """
+    my_start = time.time()
+    metadata = metadata or {}
+    metadata["condor_history_source"] = "startd"
+    metadata["condor_history_runtime"] = int(my_start)
+    metadata["condor_history_host_version"] = startd_ad.get("CondorVersion", "UNKNOWN")
+    metadata["condor_history_host_platform"] = startd_ad.get("CondorPlatform", "UNKNOWN")
+    metadata["condor_history_host_machine"] = startd_ad.get("Machine", "UNKNOWN")
+    metadata["condor_history_host_name"] = startd_ad.get("Name", "UNKNOWN")
     last_completion = since["EnteredCurrentStatus"]
     since_str = f"""(GlobalJobId == "{since['GlobalJobId']}") && (EnteredCurrentStatus == {since['EnteredCurrentStatus']})"""
-    my_start = time.time()
-    if utils.time_remaining(start_time) < 0:
-        message = (
-            "No time remaining to process %s history; exiting." % startd_ad["Machine"]
-        )
-        logging.error(message)
-        utils.send_email_alert(
-            args.email_alerts, "spider history timeout warning", message
-        )
-        return since
 
-    metadata = metadata or {}
     startd = htcondor.Startd(startd_ad)
-    logging.info(
-        "Querying %s for history",
-        startd_ad["Machine"]
-    )
+    logging.info("Querying {startd_ad['Machine']} for history since: {since_str}")
     buffered_ads = {}
     count = 0
     total_upload = 0
-    sent_warnings = False
     timed_out = False
-    if not args.read_only and args.es_feed_startd_history:
+    if not args.read_only:
         es = elastic.get_server_handle(args)
     try:
         if not args.dry_run:
-            history_iter = startd.history("True", [], since=since_str)
+            history_iter = startd.history(
+                constraint="true",
+                projection=[],
+                match=max(10000, args.startd_history_max_ads),
+                since=since_str
+            )
         else:
             history_iter = []
 
@@ -236,35 +176,18 @@ def process_startd(
                 exc = traceback.format_exc()
                 message += f"\n{exc}"
                 logging.warning(message)
-                if not sent_warnings:
-                    utils.send_email_alert(
-                        args.email_alerts,
-                        "spider history document conversion error",
-                        message,
-                    )
-                    sent_warnings = True
-
                 continue
 
-            idx = elastic.get_index(
-                index_time(args.es_index_date_attr, job_ad),
-                template=args.es_index_name,
-                update_es=(args.es_feed_startd_history and not args.read_only),
-            )
-            ad_list = buffered_ads.setdefault(idx, [])
+            ad_list = buffered_ads.setdefault(args.es_index_name, [])
             ad_list.append((convert.unique_doc_id(dict_ad), dict_ad))
 
             if len(ad_list) == args.es_bunch_size:
                 st = time.time()
-                if not args.read_only and args.es_feed_startd_history:
-                    elastic.post_ads(es.handle, idx, ad_list, metadata=metadata)
-                logging.debug(
-                    "...posting %d ads from %s (process_startd)",
-                    len(ad_list),
-                    startd_ad["Machine"],
-                )
+                if not args.read_only:
+                    elastic.post_ads(es.handle, args.es_index_name, ad_list, metadata=metadata)
+                logging.debug(f"Posting {len(ad_list)} ads from {startd_ad['Machine']} (process_startd)")
                 total_upload += time.time() - st
-                buffered_ads[idx] = []
+                buffered_ads[args.es_index_name] = []
 
             count += 1
 
@@ -276,24 +199,18 @@ def process_startd(
                     "EnteredCurrentStatus": job_ad.get("EnteredCurrentStatus"),
                 }
 
-            if utils.time_remaining(start_time) < 0:
-                message = f"History crawler on {startd_ad['Machine']} has been running for more than {utils.TIMEOUT_MINS:d} minutes; exiting."
+            if utils.time_remaining(start_time, startd_history_timeout) <= 0:
+                message = f"History crawler on {startd_ad['Machine']} has been running for more than {startd_history_timeout} seconds; exiting."
                 logging.error(message)
-                utils.send_email_alert(
-                    args.email_alerts, "spider history timeout warning", message
-                )
                 timed_out = True
                 break
 
-            if args.process_max_documents and count > args.process_max_documents:
-                logging.warning(
-                    "Aborting after %d documents (--process_max_documents option)"
-                    % args.process_max_documents
-                )
+            if args.startd_history_max_ads and count > args.startd_history_max_ads:
+                logging.warning(f"Aborting after {args.startd_history_max_ads} documents")
                 break
 
     except RuntimeError:
-        message = "Failed to query startd for job history: %s" % startd_ad["Machine"]
+        message = f"Failed to query startd for job history: {startd_ad['Machine']}"
         exc = traceback.format_exc()
         message += f"\n{exc}"
         logging.error(message)
@@ -303,34 +220,21 @@ def process_startd(
         exc = traceback.format_exc()
         message += f"\n{exc}"
         logging.exception(message)
-        utils.send_email_alert(
-            args.email_alerts, "spider startd history query error", message
-        )
 
     # Post the remaining ads
     for idx, ad_list in list(buffered_ads.items()):
         if ad_list:
-            logging.debug(
-                "...posting remaining %d ads from %s " "(process_startd)",
-                len(ad_list),
-                startd_ad["Machine"],
-            )
+            logging.debug(f"Posting remaining {len(ad_list)} ads from {startd_ad['Machine']} (process_startd)")
             if not args.read_only:
-                if args.es_feed_startd_history:
-                    elastic.post_ads(es.handle, idx, ad_list, metadata=metadata)
+                elastic.post_ads(es.handle, idx, ad_list, metadata=metadata)
 
     total_time = (time.time() - my_start) / 60.0
     total_upload /= 60.0
     last_formatted = datetime.datetime.fromtimestamp(last_completion).strftime(
         "%Y-%m-%d %H:%M:%S"
     )
-    logging.warning(
-        "Startd %-25s history: response count: %5d; last completion %s; query time %.2f min; upload time %.2f min",
-        startd_ad["Machine"],
-        count,
-        last_formatted,
-        total_time - total_upload,
-        total_upload,
+    logging.info(
+        f"Startd {startd_ad['Machine']} history: response count: {count}; last job {last_formatted}; query time {total_time - total_upload:.2f} min; upload time {total_upload:.2f} min"
     )
 
     # If we got to this point without a timeout, all these jobs have
@@ -351,10 +255,10 @@ def load_checkpoint():
     return checkpoint
 
 
-def update_checkpoint(name, completion_date):
+def update_checkpoint(name, since):
     checkpoint = load_checkpoint()
 
-    checkpoint[name] = completion_date
+    checkpoint[name] = since
 
     with open("checkpoint.json", "w") as fd:
         json.dump(checkpoint, fd, indent=4)
@@ -367,29 +271,32 @@ def process_histories(schedd_ads = [], startd_ads = [],
     multiprocessing pool
     """
     checkpoint = load_checkpoint()
+    timeout = 2*60
 
     futures = []
     metadata = metadata or {}
-    metadata["spider_source"] = "condor_history"
+    metadata["es_push_source"] = "condor_history"
 
     manager = multiprocessing.Manager()
     checkpoint_queue = manager.Queue()
 
     if len(schedd_ads) > 0:
+        timeout = args.schedd_history_timeout
         for schedd_ad in schedd_ads:
             name = schedd_ad["Name"]
 
             # Check for last completion time
             # If there was no previous completion, get full history
-            last_completion = checkpoint.get(name, 0)
+            since = checkpoint.get(name, 0)
 
             future = pool.apply_async(
                 process_schedd,
-                (starttime, last_completion, checkpoint_queue, schedd_ad, args, metadata),
+                (starttime, since, checkpoint_queue, schedd_ad, args, metadata),
             )
             futures.append((name, future))
 
     if len(startd_ads) > 0:
+        timeout = args.startd_history_timeout
         for startd_ad in startd_ads:
             machine = startd_ad["Machine"]
 
@@ -419,45 +326,25 @@ def process_histories(schedd_ads = [], startd_ads = [],
     chkp_updater = multiprocessing.Process(target=_chkp_updater)
     chkp_updater.start()
 
-    # Check if the entire pool and/or one of the processes has timed out
-    # Timeout is currently hardcoded to 11 minutes in utils.py
+    # Check if one of the processes has timed out
     timed_out = False
     for name, future in futures:
-        # Allow a 30 second buffer for processes to finish
-        if utils.time_remaining(starttime, positive=False) > -30:
+        if utils.time_remaining(starttime, timeout, positive=False) > 0:
             try:
-                # Each process gets a minimum of 10 seconds to produce output
-                future.get(utils.time_remaining(starttime) + 10)
+                future.get(timeout)
             except multiprocessing.TimeoutError:
                 # This implies that the checkpoint hasn't been updated
-                message = "Daemon %s history timed out; ignoring progress." % name
+                message = f"Daemon {name} history timed out; ignoring progress."
                 exc = traceback.format_exc()
                 message += f"\n{exc}"
                 logging.error(message)
-                utils.send_email_alert(
-                    args.email_alerts, "spider history timeout warning", message
-                )
             except elasticsearch.exceptions.TransportError:
-                message = (
-                    "Transport error while sending history data of %s; ignoring progress."
-                    % name
-                )
+                message = f"Transport error while sending history data of {name}; ignoring progress."
                 exc = traceback.format_exc()
                 message += f"\n{exc}"
                 logging.error(message)
-                utils.send_email_alert(
-                    args.email_alerts, "spider history transport error warning", message
-                )
-        else:
-            timed_out = True
-            logging.error("Processing the entire queue took too long, stopping early")
-            break
-    if timed_out:
-        pool.terminate()
 
-    checkpoint_queue.put(None)  # Send a poison pill
+    checkpoint_queue.put(None) # Send a poison pill
     chkp_updater.join()
 
-    logging.warning(
-        "Processing time for history: %.2f mins", ((time.time() - starttime) / 60.0)
-    )
+    logging.info(f"Processing time for history: {((time.time() - starttime) / 60.0)} mins")

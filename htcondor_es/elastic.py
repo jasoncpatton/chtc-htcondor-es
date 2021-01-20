@@ -40,16 +40,18 @@ def make_mappings():
     for name in filter_name(convert.BOOL_ATTRS):
         props[name] = {"type": "boolean"}
     props["metadata"] = {
-        "properties": {"spider_runtime": {"type": "date", "format": "epoch_millis"}}
+        "properties": {
+            "es_push_runtime": {"type": "date", "format": "epoch_second"},
+            "condor_history_runtime": {"type": "date", "format": "epoch_second"},
+        }
     }
 
     dynamic_templates = [
-        {"strings_as_keywords": { # Store unknown strings as keywords
-            "match_mapping_type": "string",
-            "mapping": {
+        {"raw_expressions": {  # Attrs ending in "_EXPR" are generated during
+            "match": "*_EXPR", # ad conversion for expressions that cannot be
+            "mapping": {       # evaluated.
                 "type": "keyword",
-                "norms": "false",
-                "ignore_above": 256
+                "index": "false"
             }
         }},
         {"date_attrs": { # Attrs ending in "Date" are usually timestamps
@@ -57,6 +59,12 @@ def make_mappings():
             "mapping": {
                 "type": "date",
                 "format": "epoch_second"
+            }
+        }},
+        {"provisioned_attrs", { # Attrs ending in "Provisioned" are
+            "match": "*Provisioned", # resource numbers
+            "mapping": {
+                "type": "long",
             }
         }},
         {"resource_request_attrs": {  # Attrs starting with "Request" are
@@ -68,16 +76,17 @@ def make_mappings():
         }},
         {"target_boolean_attrs": {    # Attrs starting with "Want", "Has", or
             "match_pattern": "regex", # "Is" are usually boolean checks on the
-            "match": "^(Want|Has|Is)[A-Z].*$", # target machine
+            "match": "^(Want|Has|Is)[A-Z_].*$", # target machine
             "mapping": {
                 "type": "boolean"
             }
         }},
-        {"raw_expressions": {  # Attrs ending in "_EXPR" are generated during
-            "match": "*_EXPR", # ad conversion for expressions that cannot be
-            "mapping": {       # evaluated.
+        {"strings_as_keywords": { # Store unknown strings as keywords
+            "match_mapping_type": "string",
+            "mapping": {
                 "type": "keyword",
-                "index": "false"
+                "norms": "false",
+                "ignore_above": 256
             }
         }},
     ]
@@ -109,6 +118,16 @@ def get_server_handle(args=None):
                 "Call get_server_handle with args first to create ES interface instance"
             )
             return _ES_HANDLE
+        if ":" in args.es_host:
+            if len(args.es_host.split(":")) == 2:
+                (es_host, es_port) = args.es_host.split(":")
+                es_port = int(es_port)
+            else:
+                logging.error("Ambiguous host:port in given Elasticsearch host address: {args.es_host}")
+                sys.exit(1)
+        else:
+            es_host = args.es_host
+            es_port = 9200
         _ES_HANDLE = ElasticInterface(hostname=args.es_host, port=args.es_port,
           username=args.es_username, password=args.es_password, use_https=args.es_use_https)
     return _ES_HANDLE
@@ -142,30 +161,10 @@ class ElasticInterface(object):
 
         self.handle = elasticsearch.Elasticsearch([es_client])
 
-    def fix_mapping(self, idx, template="htcondor"):
+    def make_mapping(self, idx):
         idx_clt = elasticsearch.client.IndicesClient(self.handle)
         mappings = make_mappings()
-        custom_mappings = {
-            "CMSPrimaryDataTier": mappings["properties"]["CMSPrimaryDataTier"],
-            "CMSPrimaryPrimaryDataset": mappings["properties"][
-                "CMSPrimaryPrimaryDataset"
-            ],
-            "CMSPrimaryProcessedDataset": mappings["properties"][
-                "CMSPrimaryProcessedDataset"
-            ],
-        }
-        logging.info(
-            idx_clt.put_mapping(
-                index=idx, body=json.dumps({"properties": custom_mappings}), ignore=400
-            )
-        )
-
-    def make_mapping(self, idx, template="htcondor"):
-        idx_clt = elasticsearch.client.IndicesClient(self.handle)
-        mappings = make_mappings()
-        # print(idx_clt.put_mapping(index=idx, body=json.dumps({"properties": mappings}), ignore=400))
         settings = make_settings()
-        # print(idx_clt.put_settings(index=idx, body=json.dumps(settings), ignore=400))
 
         body = json.dumps({"mappings": mappings, "settings": {"index": settings}})
 
@@ -181,27 +180,6 @@ class ElasticInterface(object):
             logging.error(
                 f'Creation of index {idx} failed: {str(result.get("error", ""))}'
             )
-
-
-_INDEX_CACHE = set()
-
-
-def get_index(timestamp, template="htcondor", update_es=True):
-    global _INDEX_CACHE
-    idx = time.strftime(
-        "%s-%%Y-%%m-%%d" % template,
-        datetime.datetime.utcfromtimestamp(timestamp).timetuple(),
-    )
-
-    if update_es:
-        if idx in _INDEX_CACHE:
-            return idx
-
-        _es_handle = get_server_handle()
-        _es_handle.make_mapping(idx, template=template)
-        _INDEX_CACHE.add(idx)
-
-    return idx
 
 
 def make_es_body(ads, metadata=None):
