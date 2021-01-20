@@ -61,7 +61,7 @@ def get_htcondor_config():
     }
 
     # Convert debug level
-    if conf.get("debug_level") is not None:
+    if conf.get("debug_levels") is not None:
         conf["log_level"] = debug2level(conf["debug_levels"])
 
     # Grab password from password file

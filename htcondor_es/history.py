@@ -267,9 +267,9 @@ def process_startd(start_time, since, checkpoint_queue, startd_ad, args, metadat
     return since
 
 
-def load_checkpoint():
+def load_checkpoint(checkpoint_file):
     try:
-        with open("checkpoint.json", "r") as fd:
+        with open(checkpoint_file, "r") as fd:
             checkpoint = json.load(fd)
     except IOError:
         checkpoint = {}
@@ -277,12 +277,12 @@ def load_checkpoint():
     return checkpoint
 
 
-def update_checkpoint(name, since):
-    checkpoint = load_checkpoint()
+def update_checkpoint(checkpoint_file, name, since):
+    checkpoint = load_checkpoint(checkpoint_file)
 
     checkpoint[name] = since
 
-    with open("checkpoint.json", "w") as fd:
+    with open(checkpoint_file, "w") as fd:
         json.dump(checkpoint, fd, indent=4)
 
 
@@ -293,7 +293,7 @@ def process_histories(
     Process history files for each schedd listed in a given
     multiprocessing pool
     """
-    checkpoint = load_checkpoint()
+    checkpoint = load_checkpoint(args.checkpoint_file)
     timeout = 2 * 60
 
     futures = []
@@ -347,7 +347,7 @@ def process_histories(
                     "EOFError - Nothing to consume left in the queue %s", error
                 )
                 break
-            update_checkpoint(*job)
+            update_checkpoint(args.checkpoint_file, *job)
 
     chkp_updater = multiprocessing.Process(target=_chkp_updater)
     chkp_updater.start()
