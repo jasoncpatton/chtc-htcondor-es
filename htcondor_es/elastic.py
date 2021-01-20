@@ -47,48 +47,45 @@ def make_mappings():
     }
 
     dynamic_templates = [
-        {"raw_expressions": {  # Attrs ending in "_EXPR" are generated during
-            "match": "*_EXPR", # ad conversion for expressions that cannot be
-            "mapping": {       # evaluated.
-                "type": "keyword",
-                "index": "false"
+        {
+            "raw_expressions": {  # Attrs ending in "_EXPR" are generated during
+                "match": "*_EXPR",  # ad conversion for expressions that cannot be
+                "mapping": {"type": "keyword", "index": "false"},  # evaluated.
             }
-        }},
-        {"date_attrs": { # Attrs ending in "Date" are usually timestamps
-            "match": "*Date",
-            "mapping": {
-                "type": "date",
-                "format": "epoch_second"
+        },
+        {
+            "date_attrs": {  # Attrs ending in "Date" are usually timestamps
+                "match": "*Date",
+                "mapping": {"type": "date", "format": "epoch_second"},
             }
-        }},
-        {"provisioned_attrs", { # Attrs ending in "Provisioned" are
-            "match": "*Provisioned", # resource numbers
-            "mapping": {
-                "type": "long",
+        },
+        {
+            "provisioned_attrs",
+            {  # Attrs ending in "Provisioned" are
+                "match": "*Provisioned",  # resource numbers
+                "mapping": {"type": "long",},
+            },
+        },
+        {
+            "resource_request_attrs": {  # Attrs starting with "Request" are
+                "match_pattern": "regex",  # usually resource numbers
+                "match": "^Request[A-Z].*$",
+                "mapping": {"type": "long",},
             }
-        }},
-        {"resource_request_attrs": {  # Attrs starting with "Request" are
-            "match_pattern": "regex", # usually resource numbers
-            "match": "^Request[A-Z].*$",
-            "mapping": {
-                "type": "long",
+        },
+        {
+            "target_boolean_attrs": {  # Attrs starting with "Want", "Has", or
+                "match_pattern": "regex",  # "Is" are usually boolean checks on the
+                "match": "^(Want|Has|Is)[A-Z_].*$",  # target machine
+                "mapping": {"type": "boolean"},
             }
-        }},
-        {"target_boolean_attrs": {    # Attrs starting with "Want", "Has", or
-            "match_pattern": "regex", # "Is" are usually boolean checks on the
-            "match": "^(Want|Has|Is)[A-Z_].*$", # target machine
-            "mapping": {
-                "type": "boolean"
+        },
+        {
+            "strings_as_keywords": {  # Store unknown strings as keywords
+                "match_mapping_type": "string",
+                "mapping": {"type": "keyword", "norms": "false", "ignore_above": 256},
             }
-        }},
-        {"strings_as_keywords": { # Store unknown strings as keywords
-            "match_mapping_type": "string",
-            "mapping": {
-                "type": "keyword",
-                "norms": "false",
-                "ignore_above": 256
-            }
-        }},
+        },
     ]
 
     mappings = {"dynamic_templates": dynamic_templates, "properties": props}
@@ -123,41 +120,59 @@ def get_server_handle(args=None):
                 (es_host, es_port) = args.es_host.split(":")
                 es_port = int(es_port)
             else:
-                logging.error("Ambiguous host:port in given Elasticsearch host address: {args.es_host}")
+                logging.error(
+                    "Ambiguous host:port in given Elasticsearch host address: {args.es_host}"
+                )
                 sys.exit(1)
         else:
             es_host = args.es_host
             es_port = 9200
-        _ES_HANDLE = ElasticInterface(hostname=args.es_host, port=args.es_port,
-          username=args.es_username, password=args.es_password, use_https=args.es_use_https)
+        _ES_HANDLE = ElasticInterface(
+            hostname=args.es_host,
+            port=args.es_port,
+            username=args.es_username,
+            password=args.es_password,
+            use_https=args.es_use_https,
+        )
     return _ES_HANDLE
 
 
 class ElasticInterface(object):
     """Interface to elasticsearch"""
 
-    def __init__(self, hostname="localhost", port=9200, username=None, password=None, use_https=False):
+    def __init__(
+        self,
+        hostname="localhost",
+        port=9200,
+        username=None,
+        password=None,
+        use_https=False,
+    ):
 
         es_client = {
-            'host': hostname,
-            'port': port,
+            "host": hostname,
+            "port": port,
         }
 
         if (username is None) and (password is None):
             # connect anonymously
             pass
         elif (username is None) != (password is None):
-            logger.warning('Only one of username and password have been defined, attempting anonymous connection to Elasticsearch')
+            logger.warning(
+                "Only one of username and password have been defined, attempting anonymous connection to Elasticsearch"
+            )
         else:
-            es_client['http_auth'] = (username, password)
+            es_client["http_auth"] = (username, password)
 
         if use_https:
-            if importlib.util.find_spec('certifi') is None:
-                logger.error('"certifi" library not found, cannot use HTTPS to connect to Elasticsearch')
+            if importlib.util.find_spec("certifi") is None:
+                logger.error(
+                    '"certifi" library not found, cannot use HTTPS to connect to Elasticsearch'
+                )
                 sys.exit(1)
             else:
-                es_client['use_ssl'] = True
-                es_client['verify_certs'] = True
+                es_client["use_ssl"] = True
+                es_client["verify_certs"] = True
 
         self.handle = elasticsearch.Elasticsearch([es_client])
 

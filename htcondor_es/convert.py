@@ -115,8 +115,7 @@ NOINDEX_KEYWORD_ATTRS = {
     "StarterIpAddr",
     "StarterPrincipal",
     "SubmitEventNotes",
-    "TransferCheckpoint"
-    "TransferInput",
+    "TransferCheckpoint" "TransferInput",
     "TransferOutput",
     "TransferOutputRemaps",
     "TransferPlugins",
@@ -431,10 +430,12 @@ def to_json(ad, return_dict=False, reduce_data=False):
     result["RecordTime"] = record_time(ad)
 
     result["ScheddName"] = ad.get("GlobalJobId", "UNKNOWN").split("#")[0]
-    result["StartdSlot"] = ad.get("RemoteHost",
-                                ad.get("LastRemoteHost", "UNKNOWN@UNKNOWN")).split("@")[0]
-    result["StartdName"] = ad.get("RemoteHost",
-                                ad.get("LastRemoteHost", "UNKNOWN@UNKNOWN")).split("@")[-1]
+    result["StartdSlot"] = ad.get(
+        "RemoteHost", ad.get("LastRemoteHost", "UNKNOWN@UNKNOWN")
+    ).split("@")[0]
+    result["StartdName"] = ad.get(
+        "RemoteHost", ad.get("LastRemoteHost", "UNKNOWN@UNKNOWN")
+    ).split("@")[-1]
 
     result["Status"] = STATUS.get(ad.get("JobStatus"), "Unknown")
     result["Universe"] = UNIVERSE.get(ad.get("JobUniverse"), "Unknown")
@@ -473,8 +474,16 @@ def case_normalize(attr):
     (Elasticsearch field names are case-sensitive.)
     """
     # Get the union of all known attrs
-    known_attrs = (TEXT_ATTRS | INDEXED_KEYWORD_ATTRS | NOINDEX_KEYWORD_ATTRS |
-        FLOAT_ATTRS | INT_ATTRS | DATE_ATTRS | BOOL_ATTRS | IGNORE_ATTRS)
+    known_attrs = (
+        TEXT_ATTRS
+        | INDEXED_KEYWORD_ATTRS
+        | NOINDEX_KEYWORD_ATTRS
+        | FLOAT_ATTRS
+        | INT_ATTRS
+        | DATE_ATTRS
+        | BOOL_ATTRS
+        | IGNORE_ATTRS
+    )
 
     # Build a dict of lowercased attrs -> known attrs
     known_attrs = {x.casefold(): x for x in known_attrs}
@@ -483,7 +492,7 @@ def case_normalize(attr):
     auto_attrs = [
         re.compile(r"^(.*)(Date)$"),
         re.compile(r"^(.*)(Provisioned)$"),
-        re.compile(r"^(Request)([A-Za-df-z].*)$"), # ignore "Requested"
+        re.compile(r"^(Request)([A-Za-df-z].*)$"),  # ignore "Requested"
         re.compile(r"^(Want|Has|Is)([A-Z_].*)$", re.IGNORECASE),
     ]
 
@@ -527,48 +536,50 @@ def bulk_convert_ad_data(ad, result):
             else:
                 continue
         elif (
-                key in TEXT_ATTRS
-                or key in INDEXED_KEYWORD_ATTRS
-                or key in NOINDEX_KEYWORD_ATTRS
-            ):
+            key in TEXT_ATTRS
+            or key in INDEXED_KEYWORD_ATTRS
+            or key in NOINDEX_KEYWORD_ATTRS
+        ):
             value = str(value)
-            if len(value) > 256: # truncate strings longer than 256 characters
+            if len(value) > 256:  # truncate strings longer than 256 characters
                 value = f"{value[:253]}..."
         elif key in FLOAT_ATTRS:
             try:
                 value = float(value)
             except ValueError:
-                logging.warning(f"Failed to convert key {key} with value {repr(value)} to float")
+                logging.warning(
+                    f"Failed to convert key {key} with value {repr(value)} to float"
+                )
                 continue
         elif (
-                key in INT_ATTRS
-                or AUTO_ATTRS["provisioned_attrs"].match(key)
-                or AUTO_ATTRS["resource_request_attrs"].match(key)
-            ):
+            key in INT_ATTRS
+            or AUTO_ATTRS["provisioned_attrs"].match(key)
+            or AUTO_ATTRS["resource_request_attrs"].match(key)
+        ):
             try:
                 value = int(value)
             except ValueError:
-                logging.warning(f"Failed to convert key {key} with value {repr(value)} to int")
+                logging.warning(
+                    f"Failed to convert key {key} with value {repr(value)} to int"
+                )
                 continue
-        elif (
-                key in BOOL_ATTRS
-                or AUTO_ATTRS["target_boolean_attrs"].match(key)
-            ):
+        elif key in BOOL_ATTRS or AUTO_ATTRS["target_boolean_attrs"].match(key):
             try:
                 value = bool(value)
             except ValueError:
-                logging.warning(f"Failed to convert key {key} with value {repr(value)} to bool")
+                logging.warning(
+                    f"Failed to convert key {key} with value {repr(value)} to bool"
+                )
                 continue
-        elif (
-                key in DATE_ATTRS
-                or AUTO_ATTRS["date_attrs"].match(key)
-            ):
+        elif key in DATE_ATTRS or AUTO_ATTRS["date_attrs"].match(key):
             try:
                 value = int(value)
                 if value == 0:
                     continue
             except ValueError:
-                logging.warning(f"Failed to convert key {key} with value {repr(value)} to int for a date field")
+                logging.warning(
+                    f"Failed to convert key {key} with value {repr(value)} to int for a date field"
+                )
                 continue
 
         result[key] = value

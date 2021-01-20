@@ -18,9 +18,7 @@ from . import elastic, utils, convert
 _LAUNCH_TIME = int(time.time())
 
 
-def process_schedd(
-    start_time, since, checkpoint_queue, schedd_ad, args, metadata=None
-):
+def process_schedd(start_time, since, checkpoint_queue, schedd_ad, args, metadata=None):
     """
     Given a schedd, process its entire set of history since last checkpoint.
     """
@@ -29,11 +27,15 @@ def process_schedd(
     metadata["condor_history_source"] = "schedd"
     metadata["condor_history_runtime"] = int(my_start)
     metadata["condor_history_host_version"] = schedd_ad.get("CondorVersion", "UNKNOWN")
-    metadata["condor_history_host_platform"] = schedd_ad.get("CondorPlatform", "UNKNOWN")
+    metadata["condor_history_host_platform"] = schedd_ad.get(
+        "CondorPlatform", "UNKNOWN"
+    )
     metadata["condor_history_host_machine"] = schedd_ad.get("Machine", "UNKNOWN")
     metadata["condor_history_host_name"] = schedd_ad.get("Name", "UNKNOWN")
     last_completion = since["EnteredCurrentStatus"]
-    since_str = f"""(ClusterId == {since['ClusterId']}) && (ProcId == {since['ProcId']})"""
+    since_str = (
+        f"""(ClusterId == {since['ClusterId']}) && (ProcId == {since['ProcId']})"""
+    )
     schedd = htcondor.Schedd(schedd_ad)
 
     logging.info(f"Querying {schedd_ad['Name']} for history ads since: {since_str}")
@@ -49,7 +51,7 @@ def process_schedd(
                 constraint="true",
                 projection=[],
                 match=max(10000, args.schedd_history_max_ads),
-                since=since_str
+                since=since_str,
             )
         else:
             history_iter = []
@@ -70,8 +72,12 @@ def process_schedd(
             if len(ad_list) == args.es_bunch_size:
                 st = time.time()
                 if not args.read_only:
-                    elastic.post_ads(es.handle, args.es_index_name, ad_list, metadata=metadata)
-                logging.debug(f"Posting {len(ad_list)} ads from {schedd_ad['Name']} (process_schedd)")
+                    elastic.post_ads(
+                        es.handle, args.es_index_name, ad_list, metadata=metadata
+                    )
+                logging.debug(
+                    f"Posting {len(ad_list)} ads from {schedd_ad['Name']} (process_schedd)"
+                )
                 total_upload += time.time() - st
                 buffered_ads[args.es_index_name] = []
 
@@ -84,7 +90,9 @@ def process_schedd(
                 since = {
                     "ClusterId": job_ad.get("ClusterId", 0),
                     "ProcId": job_ad.get("ProcId", 0),
-                    "EnteredCurrentStatus": job_ad.get("EnteredCurrentStatus", int(time.time())),
+                    "EnteredCurrentStatus": job_ad.get(
+                        "EnteredCurrentStatus", int(time.time())
+                    ),
                 }
 
             if utils.time_remaining(start_time, schedd_history_timeout) <= 0:
@@ -94,7 +102,9 @@ def process_schedd(
                 break
 
             if args.schedd_history_max_ads and count > args.schedd_history_max_ads:
-                logging.warning(f"Aborting after {args.schedd_history_max_ads} documents")
+                logging.warning(
+                    f"Aborting after {args.schedd_history_max_ads} documents"
+                )
                 break
 
     except RuntimeError:
@@ -112,7 +122,9 @@ def process_schedd(
     # Post the remaining ads
     for idx, ad_list in list(buffered_ads.items()):
         if ad_list:
-            logging.debug(f"Posting remaining {len(ad_list)} ads from {schedd_ad['Name']} (process_schedd)")
+            logging.debug(
+                f"Posting remaining {len(ad_list)} ads from {schedd_ad['Name']} (process_schedd)"
+            )
             if not args.read_only:
                 elastic.post_ads(es.handle, idx, ad_list, metadata=metadata)
 
@@ -132,9 +144,8 @@ def process_schedd(
 
     return since
 
-def process_startd(
-    start_time, since, checkpoint_queue, startd_ad, args, metadata=None
-):
+
+def process_startd(start_time, since, checkpoint_queue, startd_ad, args, metadata=None):
     """
     Given a startd, process its entire set of history since last checkpoint.
     """
@@ -143,7 +154,9 @@ def process_startd(
     metadata["condor_history_source"] = "startd"
     metadata["condor_history_runtime"] = int(my_start)
     metadata["condor_history_host_version"] = startd_ad.get("CondorVersion", "UNKNOWN")
-    metadata["condor_history_host_platform"] = startd_ad.get("CondorPlatform", "UNKNOWN")
+    metadata["condor_history_host_platform"] = startd_ad.get(
+        "CondorPlatform", "UNKNOWN"
+    )
     metadata["condor_history_host_machine"] = startd_ad.get("Machine", "UNKNOWN")
     metadata["condor_history_host_name"] = startd_ad.get("Name", "UNKNOWN")
     last_completion = since["EnteredCurrentStatus"]
@@ -163,7 +176,7 @@ def process_startd(
                 constraint="true",
                 projection=[],
                 match=max(10000, args.startd_history_max_ads),
-                since=since_str
+                since=since_str,
             )
         else:
             history_iter = []
@@ -184,8 +197,12 @@ def process_startd(
             if len(ad_list) == args.es_bunch_size:
                 st = time.time()
                 if not args.read_only:
-                    elastic.post_ads(es.handle, args.es_index_name, ad_list, metadata=metadata)
-                logging.debug(f"Posting {len(ad_list)} ads from {startd_ad['Machine']} (process_startd)")
+                    elastic.post_ads(
+                        es.handle, args.es_index_name, ad_list, metadata=metadata
+                    )
+                logging.debug(
+                    f"Posting {len(ad_list)} ads from {startd_ad['Machine']} (process_startd)"
+                )
                 total_upload += time.time() - st
                 buffered_ads[args.es_index_name] = []
 
@@ -206,7 +223,9 @@ def process_startd(
                 break
 
             if args.startd_history_max_ads and count > args.startd_history_max_ads:
-                logging.warning(f"Aborting after {args.startd_history_max_ads} documents")
+                logging.warning(
+                    f"Aborting after {args.startd_history_max_ads} documents"
+                )
                 break
 
     except RuntimeError:
@@ -224,7 +243,9 @@ def process_startd(
     # Post the remaining ads
     for idx, ad_list in list(buffered_ads.items()):
         if ad_list:
-            logging.debug(f"Posting remaining {len(ad_list)} ads from {startd_ad['Machine']} (process_startd)")
+            logging.debug(
+                f"Posting remaining {len(ad_list)} ads from {startd_ad['Machine']} (process_startd)"
+            )
             if not args.read_only:
                 elastic.post_ads(es.handle, idx, ad_list, metadata=metadata)
 
@@ -264,14 +285,15 @@ def update_checkpoint(name, since):
         json.dump(checkpoint, fd, indent=4)
 
 
-def process_histories(schedd_ads = [], startd_ads = [],
-                          starttime = None, pool = None, args = None, metadata = None):
+def process_histories(
+    schedd_ads=[], startd_ads=[], starttime=None, pool=None, args=None, metadata=None
+):
     """
     Process history files for each schedd listed in a given
     multiprocessing pool
     """
     checkpoint = load_checkpoint()
-    timeout = 2*60
+    timeout = 2 * 60
 
     futures = []
     metadata = metadata or {}
@@ -301,14 +323,15 @@ def process_histories(schedd_ads = [], startd_ads = [],
             machine = startd_ad["Machine"]
 
             # Check for last completion time ("since")
-            since = checkpoint.get(machine, {"GlobalJobId": "Unknown", "EnteredCurrentStatus": 0})
+            since = checkpoint.get(
+                machine, {"GlobalJobId": "Unknown", "EnteredCurrentStatus": 0}
+            )
 
             future = pool.apply_async(
                 process_startd,
                 (starttime, since, checkpoint_queue, startd_ad, args, metadata),
             )
             futures.append((machine, future))
-            
 
     def _chkp_updater():
         while True:
@@ -344,7 +367,9 @@ def process_histories(schedd_ads = [], startd_ads = [],
                 message += f"\n{exc}"
                 logging.error(message)
 
-    checkpoint_queue.put(None) # Send a poison pill
+    checkpoint_queue.put(None)  # Send a poison pill
     chkp_updater.join()
 
-    logging.info(f"Processing time for history: {((time.time() - starttime) / 60.0)} mins")
+    logging.info(
+        f"Processing time for history: {((time.time() - starttime) / 60.0)} mins"
+    )

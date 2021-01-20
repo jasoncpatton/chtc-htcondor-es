@@ -19,13 +19,14 @@ from pathlib import Path
 
 from . import config
 
+
 def get_schedds(args=None):
     """
     Return a list of schedd ads representing all the schedds in the pool.
     """
     collectors = args.collectors
     if collectors:
-        collectors = collectors.split(',')
+        collectors = collectors.split(",")
     else:
         collectors = []
         logging.warning("The list of Collectors to query is empty")
@@ -61,7 +62,7 @@ def get_startds(args=None):
     """
     collectors = args.collectors
     if collectors:
-        collectors = collectors.split(',')
+        collectors = collectors.split(",")
     else:
         collectors = []
         logging.warning("The list of Collectors to query is empty")
@@ -71,16 +72,22 @@ def get_startds(args=None):
         coll = htcondor.Collector(host)
         try:
             # Get one ad per machine
-            name_ads = coll.query(htcondor.AdTypes.Startd,
-                                      constraint = '(SlotType == "Static") || (SlotType == "Partitionable")',
-                                      projection = ["Name", "CondorVersion"])
+            name_ads = coll.query(
+                htcondor.AdTypes.Startd,
+                constraint='(SlotType == "Static") || (SlotType == "Partitionable")',
+                projection=["Name", "CondorVersion"],
+            )
             for ad in name_ads:
                 try:
                     # Remote history bindings only exist in startds running 8.9.7+
-                    version = tuple([int(x) for x in ad["CondorVersion"].split()[1].split('.')])
+                    version = tuple(
+                        [int(x) for x in ad["CondorVersion"].split()[1].split(".")]
+                    )
                     if ad["Name"][0:6] == "slot1@":
                         if version < (8, 9, 7):
-                            logging.warning(f"The Startd on {ad['Name'].split('@')[-1]} is running HTCondor < 8.9.7 and will be skipped")
+                            logging.warning(
+                                f"The Startd on {ad['Name'].split('@')[-1]} is running HTCondor < 8.9.7 and will be skipped"
+                            )
                             continue
                         startd = coll.locate(htcondor.DaemonTypes.Startd, ad["Name"])
                         startd["MyPool"] = host
@@ -126,7 +133,7 @@ def set_up_logging(args):
     # Determine format
     fmt = "%(asctime)s %(message)s"
     datefmt = "%m/%d/%y %H:%M:%S"
-    if 'debug_levels' in args:
+    if "debug_levels" in args:
         (fmt, datefmt) = config.debug2fmt(args.debug_levels)
 
     # Check if we're logging to a file
@@ -139,23 +146,22 @@ def set_up_logging(args):
             try:
                 log_path.parent.mkdir(parents=True)
             except Exception:
-                logging.exception(f"Error while creating log file directory {log_path.parent}")
+                logging.exception(
+                    f"Error while creating log file directory {log_path.parent}"
+                )
                 sys.exit(1)
 
-        filehandler = logging.handlers.RotatingFileHandler(args.log_file, maxBytes=100000)
-        filehandler.setFormatter(
-            logging.Formatter(fmt=fmt, datefmt=datefmt)
+        filehandler = logging.handlers.RotatingFileHandler(
+            args.log_file, maxBytes=100000
         )
+        filehandler.setFormatter(logging.Formatter(fmt=fmt, datefmt=datefmt))
         logger.addHandler(filehandler)
 
     # Check if logging to stdout is worthwhile
     if os.isatty(sys.stdout.fileno()):
         streamhandler = logging.StreamHandler(stream=sys.stdout)
-        streamhandler.setFormatter(
-            logging.Formatter(fmt=fmt, datefmt=datefmt)
-        )
+        streamhandler.setFormatter(logging.Formatter(fmt=fmt, datefmt=datefmt))
         logger.addHandler(streamhandler)
-
 
 
 def collect_metadata():

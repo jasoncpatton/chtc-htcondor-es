@@ -22,7 +22,7 @@ def main_driver(args):
     if args.schedd_history:
         schedd_ads = []
         schedd_ads = utils.get_schedds(args)
-        logging.info(f"There are {len(schedd_ads} schedds to query.")
+        logging.info(f"There are {len(schedd_ads)} schedds to query")
 
     # Get all the startd ads
     if args.startd_history:
@@ -31,7 +31,9 @@ def main_driver(args):
         logging.info(f"There are {len(startd_ads)} startds to query.")
 
     # Process histories
-    with multiprocessing.Pool(processes=args.process_parallel_queries, maxtasksperchild=1) as pool:
+    with multiprocessing.Pool(
+        processes=args.process_parallel_queries, maxtasksperchild=1
+    ) as pool:
         metadata = utils.collect_metadata()
 
         if args.process_schedd_history:
