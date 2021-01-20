@@ -13,9 +13,8 @@ from pathlib import Path
 def get_default_config():
 
     defaults = {
-        "checkpoint_file": Path(htcondor.param.get("LOG", Path.cwd()))
-        / es_push_checkpoint.json,
-        "log_file": Path(htcondor.param.get("LOG", Path.cwd())) / es_push.log,
+        "checkpoint_file": Path(htcondor.param.get("LOG", Path.cwd())) / "es_push_checkpoint.json",
+        "log_file": Path(htcondor.param.get("LOG", Path.cwd())) / "es_push.log",
         "log_level": "WARNING",
         "threads": 1,
         "collectors": htcondor.param.get("CONDOR_HOST"),
@@ -62,11 +61,11 @@ def get_htcondor_config():
     }
 
     # Convert debug level
-    if conf["debug_level"] is not None:
+    if conf.get("debug_level") is not None:
         conf["log_level"] = debug2level(conf["debug_levels"])
 
     # Grab password from password file
-    if conf["es_password_file"] is not None:
+    if conf.get("es_password_file") is not None:
         passwd = Path(conf["es_password_file"])
         try:
             with passwd.open() as f:
@@ -80,7 +79,7 @@ def get_htcondor_config():
 
     # For schedds and startds, "*" is shorthand for all (which is the default)
     for conf_key in ["schedds", "startds"]:
-        if conf[conf_key] == "*":
+        if conf.get(conf_key) == "*":
             del conf[conf_key]
 
     # remove None values
@@ -161,8 +160,9 @@ def debug2fmt(debug=None):
         else:
             fmt_list[0] = "%(created)d"
 
-    if "D_SUB_SECOND" in debug_levels:
-        datefmt = "%m/%d/%y %H:%M:%S.%f"  # this prints microseconds, sigh
+    elif "D_SUB_SECOND" in debug_levels:
+        datefmt = "%m/%d/%y %H:%M:%S"
+        fmt_list[0] = "%(asctime)s.%(msecs)03d"
 
     fmt = " ".join(fmt_list)
     return {"fmt": fmt, "datefmt": datefmt}
@@ -214,7 +214,7 @@ def normalize_config_types(conf):
 def get_config(argv=None):
 
     if argv is None:
-        argv = sys.argv
+        argv = sys.argv[1:]
 
     # Start with defaults
     defaults = get_default_config()

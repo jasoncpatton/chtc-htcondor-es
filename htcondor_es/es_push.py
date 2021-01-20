@@ -3,13 +3,14 @@
 Script for processing the contents of the CHTC pool.
 """
 
+import sys
 import time
 import signal
 import logging
 import argparse
 import multiprocessing
 
-from . import history, utils, config
+from es_push import history, utils, config
 
 
 def main_driver(args):
@@ -32,11 +33,11 @@ def main_driver(args):
 
     # Process histories
     with multiprocessing.Pool(
-        processes=args.process_parallel_queries, maxtasksperchild=1
+        processes=args.threads, maxtasksperchild=1
     ) as pool:
         metadata = utils.collect_metadata()
 
-        if args.process_schedd_history:
+        if args.schedd_history:
             history.process_histories(
                 schedd_ads=schedd_ads,
                 starttime=starttime,
@@ -45,7 +46,7 @@ def main_driver(args):
                 metadata=metadata,
             )
 
-        if args.process_startd_history:
+        if args.startd_history:
             history.process_histories(
                 startd_ads=startd_ads,
                 starttime=starttime,
@@ -65,7 +66,7 @@ def main():
     """
 
     # get args
-    args = config.get_config(sys.argv)
+    args = config.get_config(sys.argv[1:])
 
     # dry_run implies read_only
     args.read_only = args.read_only or args.dry_run

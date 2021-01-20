@@ -18,7 +18,7 @@ AUTO_ATTRS = {
 
 # TEXT_ATTRS should only contain attrs that we want full text search on,
 # otherwise strings are stored as keywords.
-TEXT_ATTRS = {}
+TEXT_ATTRS = {} or set()
 
 INDEXED_KEYWORD_ATTRS = {
     "AccountingGroup",
@@ -516,7 +516,7 @@ def bulk_convert_ad_data(ad, result):
     Given a ClassAd, bulk convert to a python dictionary.
     """
     keys = set(ad.keys())
-    for key in keys():
+    for key in keys:
         key = case_normalize(key)
 
         # Do not return ignored attrs

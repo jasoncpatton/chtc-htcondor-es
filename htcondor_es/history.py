@@ -36,6 +36,7 @@ def process_schedd(start_time, since, checkpoint_queue, schedd_ad, args, metadat
     since_str = (
         f"""(ClusterId == {since['ClusterId']}) && (ProcId == {since['ProcId']})"""
     )
+
     schedd = htcondor.Schedd(schedd_ad)
 
     logging.info(f"Querying {schedd_ad['Name']} for history ads since: {since_str}")
@@ -48,10 +49,10 @@ def process_schedd(start_time, since, checkpoint_queue, schedd_ad, args, metadat
     try:
         if not args.dry_run:
             history_iter = schedd.history(
-                constraint="true",
+                requirements="true",
                 projection=[],
-                match=max(10000, args.schedd_history_max_ads),
-                since=since_str,
+                match=min(10000, args.schedd_history_max_ads),
+                since=since_str
             )
         else:
             history_iter = []
@@ -95,8 +96,8 @@ def process_schedd(start_time, since, checkpoint_queue, schedd_ad, args, metadat
                     ),
                 }
 
-            if utils.time_remaining(start_time, schedd_history_timeout) <= 0:
-                message = f"History crawler on {schedd_ad['Name']} has been running for more than {schedd_history_timeout} seconds; exiting."
+            if utils.time_remaining(start_time, args.schedd_history_timeout) <= 0:
+                message = f"History crawler on {schedd_ad['Name']} has been running for more than {args.schedd_history_timeout} seconds; exiting."
                 logging.error(message)
                 timed_out = True
                 break
@@ -216,8 +217,8 @@ def process_startd(start_time, since, checkpoint_queue, startd_ad, args, metadat
                     "EnteredCurrentStatus": job_ad.get("EnteredCurrentStatus"),
                 }
 
-            if utils.time_remaining(start_time, startd_history_timeout) <= 0:
-                message = f"History crawler on {startd_ad['Machine']} has been running for more than {startd_history_timeout} seconds; exiting."
+            if utils.time_remaining(start_time, args.startd_history_timeout) <= 0:
+                message = f"History crawler on {startd_ad['Machine']} has been running for more than {args.startd_history_timeout} seconds; exiting."
                 logging.error(message)
                 timed_out = True
                 break
@@ -309,7 +310,9 @@ def process_histories(
 
             # Check for last completion time
             # If there was no previous completion, get full history
-            since = checkpoint.get(name, 0)
+            since = checkpoint.get(
+                name, {"ClusterId": 0, "ProcId": 0, "EnteredCurrentStatus": 0}
+            )
 
             future = pool.apply_async(
                 process_schedd,

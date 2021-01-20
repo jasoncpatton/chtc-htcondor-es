@@ -134,7 +134,9 @@ def set_up_logging(args):
     fmt = "%(asctime)s %(message)s"
     datefmt = "%m/%d/%y %H:%M:%S"
     if "debug_levels" in args:
-        (fmt, datefmt) = config.debug2fmt(args.debug_levels)
+        fmts = config.debug2fmt(args.debug_levels)
+        fmt = fmts["fmt"]
+        datefmt = fmts["datefmt"]
 
     # Check if we're logging to a file
     if args.log_file is not None:
